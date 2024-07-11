@@ -101,6 +101,40 @@ fn round_trip_encode_indexed() {
 }
 
 #[test]
+#[should_panic(expected = "Check failed for IndexedPackedSequence, expected chunk length 3, got 4")]
+fn round_trip_encode_indexed_mismatched_length() {
+    let mut rng = StdRng::seed_from_u64(0);
+    let seq = random_sequence(&mut rng, 62);
+
+    println!("Sequence: {seq}");
+
+    let packed = IndexedPackedSequence::<u8, 4>::new(&seq);
+
+    let serialized = packed.serialize_and_compress()
+        .expect("Serialization works");
+
+    let _deserialized = IndexedPackedSequence::<u8, 3>::decompress_and_deserialize(&serialized)
+        .expect("Deserialization (shouldn't) work");
+}
+
+#[test]
+#[should_panic(expected = "Io(Kind(UnexpectedEof))")]
+fn round_trip_encode_indexed_mismatched_type() {
+    let mut rng = StdRng::seed_from_u64(0);
+    let seq = random_sequence(&mut rng, 62);
+
+    println!("Sequence: {seq}");
+
+    let packed = IndexedPackedSequence::<u16, 5>::new(&seq);
+
+    let serialized = packed.serialize_and_compress()
+        .expect("Serialization works");
+
+    let _deserialized = IndexedPackedSequence::<u8, 3>::decompress_and_deserialize(&serialized)
+        .expect("Deserialization (shouldn't) work");
+}
+
+#[test]
 fn index_sanity_check() {
     let mut rng = StdRng::seed_from_u64(0);
     let seq = random_sequence(&mut rng, 62);

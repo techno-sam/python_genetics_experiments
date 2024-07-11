@@ -1,0 +1,10 @@
+[package]
+name = "genome_rspy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+packed_genome = { version="0.1.0", path="packed_genome" }
+
+[workspace]
+members = ["packed_genome"]

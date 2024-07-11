@@ -7,7 +7,7 @@ use ndarray::prelude::*;
 
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::ops::Deref;
 
 fn pack(c: char) -> Option<u8> {
@@ -74,7 +74,7 @@ impl From<String> for LocalString {
     }
 }
 
-pub trait FindBounded<Pat, T> where T: num::Integer {
+trait FindBounded<Pat, T> where T: num::Integer {
     fn find_bounded(&self, pat: Pat, start: Option<T>, end: Option<T>) -> Option<T>;
 }
 
@@ -199,10 +199,16 @@ fn variants(v: Vec<u8>) -> [Vec<u8>; 4] {
     variants
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct SimplePackedSequence {
     packed: Vec<u8>,
     len: usize
+}
+
+impl Display for SimplePackedSequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SimplePackedSequence({} {})", self.len(), self.str())
+    }
 }
 
 impl PackedSequence for SimplePackedSequence {
@@ -246,10 +252,16 @@ impl PackedSequence for SimplePackedSequence {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct PreVariedPackedSequence {
     parent: SimplePackedSequence,
     variants: [Vec<u8>; 4]
+}
+
+impl Display for PreVariedPackedSequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PreVariedPackedSequence({} {})", self.len(), self.str())
+    }
 }
 
 impl PackedSequence for PreVariedPackedSequence {
@@ -405,10 +417,43 @@ impl NucleotideKey<32> for u64 {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+struct CheckedIndexedPackedSequence<K: NucleotideKey<C>, const C: usize> {
+    parent: PreVariedPackedSequence,
+    index: HashMap<K, Vec<usize>>,
+    c: usize
+}
+
+impl<K: NucleotideKey<C>, const C: usize> TryFrom<CheckedIndexedPackedSequence<K, C>> for IndexedPackedSequence<K, C> {
+    type Error = String;
+
+    fn try_from(value: CheckedIndexedPackedSequence<K, C>) -> Result<Self, Self::Error> {
+        if value.c == C {
+            Ok(IndexedPackedSequence { parent: value.parent, index: value.index })
+        } else {
+            Err(format!("Check failed for IndexedPackedSequence, expected chunk length {}, got {}", C, value.c))
+        }
+    }
+}
+
+impl<K: NucleotideKey<C>, const C: usize> Into<CheckedIndexedPackedSequence<K, C>> for IndexedPackedSequence<K, C> {
+    fn into(self) -> CheckedIndexedPackedSequence<K, C> {
+        CheckedIndexedPackedSequence { parent: self.parent, index: self.index, c: C }
+    }
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(into = "CheckedIndexedPackedSequence<K, C>")]
+#[serde(try_from = "CheckedIndexedPackedSequence<K, C>")]
 pub struct IndexedPackedSequence<K: NucleotideKey<C>, const C: usize> {
     parent: PreVariedPackedSequence,
     index: HashMap<K, Vec<usize>>
+}
+
+impl<K: NucleotideKey<C>, const C: usize> Display for IndexedPackedSequence<K, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "IndexedPackedSequence<{}>({} {} index length: {})", C, self.len(), self.str(), self.index.len())
+    }
 }
 
 impl<K: NucleotideKey<C>, const C: usize> IndexedPackedSequence<K, C> {
@@ -499,7 +544,7 @@ impl<K: NucleotideKey<C>, const C: usize> PackedSequence for IndexedPackedSequen
             let mut comparison_section = variant[i/4 .. i/4 + (pat.len()+3)/4].to_owned();
             if i % 4 != 0 {
                 let len = comparison_section.len();
-                comparison_section[len - 1] &= 0xff << (8 - 2 * (pat.len() % 4)) & 0xff;
+                comparison_section[len - 1] &= 0xffu8.overflowing_shl((8 - 2 * (pat.len() % 4)) as u32).0;
             }
 
             if pat.get_packed() == &comparison_section {
@@ -519,7 +564,7 @@ impl<K: NucleotideKey<C>, const C: usize> PackedSequence for IndexedPackedSequen
     }
 }
 
-#[allow(unused_macros)]
+#[macro_export]
 macro_rules! indexed_packed_sequence {
     ($seq:expr, 1) => {
         IndexedPackedSequence::<u8, 1>::new($seq)

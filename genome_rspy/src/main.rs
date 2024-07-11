@@ -39,4 +39,8 @@ fn main() {
     for v in SimplePackedSequence::new("AGTTAAGCTGTCGCTCCGGACGCTGCCGATAGACACGCGCAAATGTATATTA").subsections(7) {
         println!("Subsection: {}", v);
     }
+
+    for v in SimplePackedSequence::new("ACT").subsections(7) {
+        println!("Subsection: {}", v);
+    }
 }

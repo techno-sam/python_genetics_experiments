@@ -239,7 +239,9 @@ impl PackedSequence for SimplePackedSequence {
     fn subsections(&self, chunk_length: usize) -> impl Iterator<Item = SimplePackedSequence> {
         let variants = variants(self.packed.clone());
 
-        return (0..self.len() - chunk_length + 1).map(move |start| {
+        let end = if chunk_length > self.len() {0} else {self.len() - chunk_length + 1};
+
+        return (0..end).map(move |start| {
             let variant = &variants[start % 4];
             let packed = &variant[start/4 .. start/4 + (chunk_length+3)/4];
 
@@ -285,7 +287,8 @@ impl PackedSequence for PreVariedPackedSequence {
     }
 
     fn subsections(&self, chunk_length: usize) -> impl Iterator<Item = SimplePackedSequence> {
-        return (0..self.len() - chunk_length + 1).map(move |start| {
+        let end = if chunk_length > self.len() {0} else {self.len() - chunk_length + 1};
+        return (0..end).map(move |start| {
             let variant = &self.variants[start % 4];
             let packed = &variant[start/4 .. start/4 + (chunk_length+3)/4];
 
@@ -561,6 +564,219 @@ impl<K: NucleotideKey<C>, const C: usize> PackedSequence for IndexedPackedSequen
 
     fn get_packed<'a>(&'a self) -> &'a Vec<u8> {
         self.parent.get_packed()
+    }
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub enum StandardIndexedPackedSequence {
+    CS1(IndexedPackedSequence<u8, 1>),
+    CS2(IndexedPackedSequence<u8, 2>),
+    CS3(IndexedPackedSequence<u8, 3>),
+    CS4(IndexedPackedSequence<u8, 4>),
+    CS5(IndexedPackedSequence<u16, 5>),
+    CS6(IndexedPackedSequence<u16, 6>),
+    CS7(IndexedPackedSequence<u16, 7>),
+    CS8(IndexedPackedSequence<u16, 8>),
+    CS16(IndexedPackedSequence<u32, 16>),
+    CS32(IndexedPackedSequence<u64, 32>)
+}
+
+impl StandardIndexedPackedSequence {
+    pub fn new(seq: &str, chunk_length: usize) -> Option<StandardIndexedPackedSequence> {
+        match chunk_length {
+            1 => Some(StandardIndexedPackedSequence::CS1(indexed_packed_sequence!(seq, 1))),
+            2 => Some(StandardIndexedPackedSequence::CS2(indexed_packed_sequence!(seq, 2))),
+            3 => Some(StandardIndexedPackedSequence::CS3(indexed_packed_sequence!(seq, 3))),
+            4 => Some(StandardIndexedPackedSequence::CS4(indexed_packed_sequence!(seq, 4))),
+            5 => Some(StandardIndexedPackedSequence::CS5(indexed_packed_sequence!(seq, 5))),
+            6 => Some(StandardIndexedPackedSequence::CS6(indexed_packed_sequence!(seq, 6))),
+            7 => Some(StandardIndexedPackedSequence::CS7(indexed_packed_sequence!(seq, 7))),
+            8 => Some(StandardIndexedPackedSequence::CS8(indexed_packed_sequence!(seq, 8))),
+            16 => Some(StandardIndexedPackedSequence::CS16(indexed_packed_sequence!(seq, 16))),
+            32 => Some(StandardIndexedPackedSequence::CS32(indexed_packed_sequence!(seq, 32))),
+            _ => None
+        }
+    }
+}
+
+impl PackedSequence for StandardIndexedPackedSequence {
+    fn new(seq: &str) -> Self where Self: Sized {
+        Self::CS8(IndexedPackedSequence::<u16, 8>::new(seq))
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            StandardIndexedPackedSequence::CS1(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS2(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS3(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS4(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS5(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS6(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS7(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS8(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS16(v) => {
+                v.len()
+            },
+            StandardIndexedPackedSequence::CS32(v) => {
+                v.len()
+            },
+        }
+    }
+
+    fn get(&self, idx: usize) -> char {
+        match self {
+            StandardIndexedPackedSequence::CS1(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS2(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS3(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS4(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS5(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS6(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS7(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS8(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS16(v) => {
+                v.get(idx)
+            },
+            StandardIndexedPackedSequence::CS32(v) => {
+                v.get(idx)
+            },
+        }
+    }
+
+    fn find_bounded(&self, pat: impl PackedSequence, start: Option<usize>, end: Option<usize>) -> Option<usize> {
+        match self {
+            StandardIndexedPackedSequence::CS1(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS2(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS3(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS4(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS5(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS6(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS7(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS8(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS16(v) => {
+                v.find_bounded(pat, start, end)
+            },
+            StandardIndexedPackedSequence::CS32(v) => {
+                v.find_bounded(pat, start, end)
+            },
+        }
+    }
+
+    fn subsections(&self, chunk_length: usize) -> impl Iterator<Item = SimplePackedSequence> {
+        match self {
+            StandardIndexedPackedSequence::CS1(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS2(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS3(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS4(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS5(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS6(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS7(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS8(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS16(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+            StandardIndexedPackedSequence::CS32(v) => {
+                v.subsections(chunk_length).collect::<Vec<_>>().into_iter()
+            },
+        }
+    }
+
+    fn get_packed<'a>(&'a self) -> &'a Vec<u8> {
+        match self {
+            StandardIndexedPackedSequence::CS1(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS2(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS3(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS4(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS5(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS6(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS7(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS8(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS16(v) => {
+                v.get_packed()
+            },
+            StandardIndexedPackedSequence::CS32(v) => {
+                v.get_packed()
+            },
+        }
     }
 }
 

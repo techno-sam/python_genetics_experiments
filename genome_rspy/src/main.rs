@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use genome_rspy::{load_mutants, parse_chromosomes, search_chromosome};
+use genome_rspy::{load_mutants, parse_chromosomes, search_chromosome, search_chromosome_general};
 use packed_genome::{indexed_packed_sequence, IndexedPackedSequence, PackedSequence, SimplePackedSequence};
 
 fn main() {
@@ -69,14 +69,20 @@ fn main() {
             Path::new("/home/sam/PycharmProjects/PythonADClassWorkspace/python_genetics_experiments/scratch/gget_mutate_out_mutant_reference.fa")
         ).expect("Failed to load mutants");
 
-        let r = search_chromosome(
+        let r = search_chromosome_general(
             "5 dna:chromosome chromosome:GRCh38:5:1:181538259:1 REF",
             Path::new("/home/sam/PycharmProjects/PythonADClassWorkspace/python_genetics_experiments/scratch/rust_checkpoints"),
-            mutants
+            &mutants,
+            31
         );
 
         match r {
-            Ok(v) => println!("Searched chromosome, got {} hits", v.len()),
+            Ok(v) => {
+                println!("Searched chromosome, got {} hits", v.len());
+                for hit in v {
+                    println!("\t{:?}", hit);
+                }
+            },
             Err(e) => println!("Failed to search chromosome: {}", e)
         };
     }

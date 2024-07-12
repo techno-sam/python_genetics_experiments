@@ -389,7 +389,7 @@ pub trait NucleotideKey<const C: usize> where Self: Sized + std::cmp::Eq + std::
 
 impl NucleotideKey<1> for u8 {
     fn to_key(seq: &[u8]) -> Self {
-        assert!(seq.len() == 1);
+        assert!(seq.len() >= 1);
         return seq[0] & 0b11_00_00_00;
     }
 
@@ -715,10 +715,11 @@ impl<K: NucleotideKey<C>, const C: usize> PackedSequence for IndexedPackedSequen
     unsafe fn find_all_31mer(&self, pat: &impl PackedSequence) -> Option<Vec<usize>> {
         const PAT_LEN: usize = 31;
 
-        if C > PAT_LEN {
+        // WARN: the caller must check this
+        /*if C > PAT_LEN {
             println!("Warning: chunk length is greater than the length of the item, falling back to slow implementation");
             return self.parent.find_all(pat);
-        }
+        }*/
 
         let pat_packed = pat.get_packed();
         let key = K::to_key(pat_packed);
@@ -800,6 +801,21 @@ impl StandardIndexedPackedSequence {
             16 => Some(StandardIndexedPackedSequence::CS16(indexed_packed_sequence!(seq, 16))),
             32 => Some(StandardIndexedPackedSequence::CS32(indexed_packed_sequence!(seq, 32))),
             _ => None
+        }
+    }
+
+    pub fn chunk_length(&self) -> usize {
+        match self {
+            StandardIndexedPackedSequence::CS1(_) => 1,
+            StandardIndexedPackedSequence::CS2(_) => 2,
+            StandardIndexedPackedSequence::CS3(_) => 3,
+            StandardIndexedPackedSequence::CS4(_) => 4,
+            StandardIndexedPackedSequence::CS5(_) => 5,
+            StandardIndexedPackedSequence::CS6(_) => 6,
+            StandardIndexedPackedSequence::CS7(_) => 7,
+            StandardIndexedPackedSequence::CS8(_) => 8,
+            StandardIndexedPackedSequence::CS16(_) => 16,
+            StandardIndexedPackedSequence::CS32(_) => 32,
         }
     }
 }

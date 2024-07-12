@@ -149,6 +149,7 @@ macro_rules! iores {
     };
 }
 
+// TODO: Python API
 /// Given a path to a fasta file and a directory to store chromosomes in, returns a list of the
 /// names of loaded chromosomes
 pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> io::Result<Vec<String>> {
@@ -217,59 +218,123 @@ pub fn load_mutants(mutants_path: &Path) -> io::Result<PackedFasta> {
     return Ok(out);
 }
 
-pub struct HitRecord {
-    mutant_name: String,
-    chromosome_name: String,
+#[derive(Debug)]
+pub struct HitRecord<'a> {
+    read_name: &'a str,
     // NOTE: the index written here is
     // (chromosome.raw_sequence.idx(mutant) + chromosome.leading_ns)
-    chromosome_start: usize,
-    chromosome_end: usize
+    chromosome_start: usize
 }
 
-pub fn search_chromosome(chromosome_name: &str, storage_dir: &Path, mutants: PackedFasta) -> io::Result<Vec<HitRecord>> {
+pub fn search_chromosome_general<'a>(chromosome_name: &str, storage_dir: &Path, mutants: &'a PackedFasta, kmer_length: usize) -> io::Result<Vec<HitRecord<'a>>> {
+    if kmer_length == 31 {
+        return search_chromosome(chromosome_name, storage_dir, mutants);
+    }
+
+    println!("Warning: searching with kmer length other than 31 is significantly slower");
+
+    // This is exactly the same as below, but less generalized
     let file_name = format!("{:x}.chr", md5::compute(&chromosome_name));
     let file_path = storage_dir.join(file_name);
 
     println!("> Reading chromosome '{}'", &chromosome_name);
     let contents = fs::read(file_path)?;
 
-    println!("> Decompressing and deserializing chromosome '{}'", &chromosome_name);
+    println!("> Deserializing chromosome '{}'", &chromosome_name);
     let chromosome = iores!(Chromosome::decompress_and_deserialize(&contents))?;
 
     println!("> Searching chromosome '{}'", &chromosome_name);
 
+    let chunk_length = chromosome.seq.chunk_length();
+    if chunk_length > kmer_length {
+        return iores!(Err::<Vec<HitRecord<'a>>, String>(
+                format!("Cannot use index length {} for {}-mers, that will take until the heat death of the universe", chunk_length, kmer_length)
+        ));
+    }
+
     let out = tqdm(mutants.0.iter())
         .desc(Some("searching"))
         .map(move |(label, seq)| {
-            seq.subsections(31)
-            .map(move |subs| (label, subs))
+            seq.subsections(kmer_length)
+                .map(move |subs| (label, subs))
         })
         .flatten()
-        //.collect::<Vec<_>>()
-        //.into_iter()
         .par_bridge()
         .map(|(label, subseq)| {
             let mut occurrences: Vec<HitRecord> = Vec::new();
-            let mut start = 0;
 
-            while start < chromosome.seq.len() - 31 {
-                start  = match chromosome.seq.find_bounded(&subseq, Some(start), None) {
-                    Some(found) => {
-                        occurrences.push(HitRecord {
-                            mutant_name: label.clone(),
-                            chromosome_name: chromosome_name.to_owned(),
-                            chromosome_start: found + chromosome.leading_ns,
-                            chromosome_end: found + chromosome.leading_ns + subseq.len()
-                        });
-                        found + 1
-                    },
-                    None => break
-                };
+            let all = chromosome.seq.find_all(&subseq);
+
+            if let Some(v) = all {
+                 for found in v {
+                     occurrences.push(HitRecord {
+                         read_name: &label,
+                         chromosome_start: found + chromosome.leading_ns
+                     });
+                 }
             }
 
             return occurrences;
         })
         .flatten_iter()
+        .take_any(5)
+        .collect();
+
+    return Ok(out);
+}
+
+// TODO: Python API combined with `load_mutants` above
+pub fn search_chromosome<'a>(chromosome_name: &str, storage_dir: &Path, mutants: &'a PackedFasta) -> io::Result<Vec<HitRecord<'a>>> {
+    let file_name = format!("{:x}.chr", md5::compute(&chromosome_name));
+    let file_path = storage_dir.join(file_name);
+
+    println!("> Reading chromosome '{}'", &chromosome_name);
+    let contents = fs::read(file_path)?;
+
+    println!("> Deserializing chromosome '{}'", &chromosome_name);
+    let chromosome = iores!(Chromosome::decompress_and_deserialize(&contents))?;
+
+    println!("> Searching chromosome '{}'", &chromosome_name);
+
+    let chunk_length = chromosome.seq.chunk_length();
+    if chunk_length > 31 {
+        return iores!(Err::<Vec<HitRecord<'a>>, String>(
+                format!("Cannot use index length {} for 31-mers, that will take until the heat death of the universe", chunk_length)
+        ));
+    }
+
+    let out = tqdm(mutants.0.iter())
+        .desc(Some("searching"))
+        .map(move |(label, seq)| {
+            seq.subsections(31) // WARN: if this gets changed from 31, the line marked below MUST
+                                // be changed as well. Perhaps you should use the general function?
+            .map(move |subs| (label, subs))
+        })
+        .flatten()
+        //.collect::<Vec<_>>()
+        //.into_iter())
+        .par_bridge()
+        .map(|(label, subseq)| {
+            let mut occurrences: Vec<HitRecord> = Vec::new();
+
+            // WARN: if seq.subsections(31) gets changed to a different number, this call must be
+            // changed to chromosome.seq.find_all(&subseq), which is much less optimized
+            let all = unsafe {chromosome.seq.find_all_31mer(&subseq)};
+
+            if let Some(v) = all {
+                for found in v {
+                    occurrences.push(HitRecord {
+                        read_name: &label,
+                        chromosome_start: found + chromosome.leading_ns,
+                        //chromosome_end: found + chromosome.leading_ns + subseq.len()
+                    });
+                }
+            }
+
+            return occurrences;
+        })
+        .flatten_iter()
+        .take_any(5)
         .collect();
 
     return Ok(out);

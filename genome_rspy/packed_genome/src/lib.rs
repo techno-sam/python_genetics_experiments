@@ -1,13 +1,13 @@
 use bincode;
 
-use bzip2::Compression;
-use bzip2::write::{BzEncoder, BzDecoder};
+//use bzip2::Compression;
+//use bzip2::write::{BzEncoder, BzDecoder};
 
 use ndarray::prelude::*;
 
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::io::{self, Write};
+use std::io::{self/*, Write*/};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -129,7 +129,7 @@ pub trait DeSerializable: Sized + serde::Serialize + for <'a> serde::Deserialize
         //let decompressed_data = decoder.finish()?;
         let decompressed_data = data;
 
-        println!("> Decompressed {} bytes, deserializing", decompressed_data.len());
+        println!("> Deserializing {} bytes", decompressed_data.len());
 
         // Deserialize the decompressed data
         let deserialized_data: Self = match bincode::deserialize(&decompressed_data) {

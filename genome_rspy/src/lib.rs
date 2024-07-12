@@ -98,7 +98,7 @@ impl From<PackedFasta> for Fasta {
 impl From<Fasta> for PackedFasta {
     fn from(value: Fasta) -> Self {
         PackedFasta(
-            value.0.into_iter()
+            value.0.into_par_iter()
             .map(
                 |(label, seq)| (label, SimplePackedSequence::new(&seq))
             )
@@ -116,7 +116,7 @@ pub struct Chromosome {
 }
 
 impl Chromosome {
-    fn new(name: &str, raw_sequence: &str) -> Result<Chromosome, String> {
+    fn new(name: &str, raw_sequence: &str, index_size: usize) -> Result<Chromosome, GenomeError> {
         let raw_sequence = raw_sequence.to_ascii_uppercase();
         let raw_sequence = raw_sequence.trim_end_matches('N');
         let pre_len = raw_sequence.len();
@@ -127,12 +127,12 @@ impl Chromosome {
         let raw_sequence = raw_sequence.replace('N', "A");
 
         if raw_sequence.chars().any(|c| c != 'A' && c != 'C' && c != 'T' && c != 'G') {
-            return Err("Invalid character, must be all A, C, T, G, or N".to_owned());
+            return Err(GenomeError::InvalidNucleotideCharacter);
         }
 
-        let seq = match StandardIndexedPackedSequence::new(&raw_sequence, 8) {
+        let seq = match StandardIndexedPackedSequence::new(&raw_sequence, index_size) {
             Some(s) => s,
-            None => return Err("Failed to create an IndexedPackedSequence with chunk length 8".to_owned())
+            None => return Err(GenomeError::IndexSize(index_size))
         };
 
         let name = name.to_owned();
@@ -158,7 +158,7 @@ macro_rules! iores {
 
 /// Given a path to a fasta file and a directory to store chromosomes in, returns a list of the
 /// names of loaded chromosomes
-pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> Result<Vec<String>, GenomeError> {
+pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path, index_size: usize) -> Result<Vec<(String, Option<GenomeError>)>, GenomeError> {
     fs::create_dir_all(storage_dir)?;
 
     println!("Reading file");
@@ -169,13 +169,16 @@ pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> Result<Vec<St
     println!("Parsing chromosomes");
 
     return Ok(parsed.0.into_par_iter()
-        .filter(|(label, _)| label == "5 dna:chromosome chromosome:GRCh38:5:1:181538259:1 REF")
+        .filter(|(label, _)| label == "5 dna:chromosome chromosome:GRCh38:5:1:181538259:1 REF") // FIXME:
+                                                                                                // remove
+                                                                                                // before
+                                                                                                // release
         .map(|(label, seq)| {
             println!("> Parsing chromosome '{}'", &label);
-            let chromosome = Chromosome::new(&label, &seq);
+            let chromosome = Chromosome::new(&label, &seq, index_size);
             drop(seq);
 
-            match chromosome {
+            let err = match chromosome {
                 Ok(c) => {
                     println!("> Writing chromosome '{}'", &label);
                     let file_name = format!("{:x}.chr", md5::compute(&label));
@@ -194,16 +197,23 @@ pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> Result<Vec<St
                     };
 
                     match write_result {
-                        Ok(()) => println!("> Saved chromosome '{}' successfully", &label),
-                        Err(e) => println!("> Error: Failed to save chromosome '{}': {}", &label, e)
-                    };
+                        Ok(()) => {
+                            println!("> Saved chromosome '{}' successfully", &label);
+                            None
+                        },
+                        Err(e) => {
+                            println!("> Error: Failed to save chromosome '{}': {}", &label, e);
+                            Some(e.into())
+                        },
+                    }
                 },
                 Err(e) => {
                     println!("> Error: Failed to load chromosome '{}': {}", label, e);
+                    Some(e)
                 }
-            }
+            };
 
-            return label.to_owned();
+            return (label.to_owned(), err);
         })
         .collect()
     );
@@ -211,9 +221,15 @@ pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> Result<Vec<St
 
 #[derive(Error, Debug)]
 pub enum GenomeError {
-    #[error("Cannot use index length {0} for {1}-mers, that will take until the heat death of the universe")]
+    #[error("Cannot use index length {0} for {1}-mers, that will take until the heat death of the universe.")]
     /// (index length, kmer length)
     HeatDeath(usize, usize),
+
+    #[error("Index size {0} is not a valid size. Valid sizes are 1, 2, 3, 4, 5, 6, 7, 8, 16, and 32.")]
+    IndexSize(usize),
+
+    #[error("Invalid nucleotide character, sequence must be made purely of A, C, T, G, or N characters.")]
+    InvalidNucleotideCharacter,
 
     #[error(transparent)]
     IOError(#[from] std::io::Error),

@@ -1,15 +1,21 @@
 use super::*;
 
+fn sorted<T: Ord>(v: Vec<T>) -> Vec<T> {
+    let mut v = v;
+    v.sort();
+    return v;
+}
+
 #[test]
 fn fasta_parsing() {
     let fasta = ">MyTitle\nACTGTTTACGACTCTATCAGAGAGGGATTAC\nCATCTACTTCTAA\n>OtherLabel\nATCTCTACATGAGGAGGATTACATAGAGGAGATGATGTCCG";
 
-    let parsed = Fasta::parse_fasta(fasta).expect("Parsing succeeded");
-    assert_eq!(parsed.0.len(), 2);
-    assert_eq!(parsed.0, vec![
+    let parsed = sorted(Fasta::parse_fasta(fasta).expect("Parsing succeeded").0);
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed, sorted(vec![
         ("MyTitle".to_owned(), "ACTGTTTACGACTCTATCAGAGAGGGATTACCATCTACTTCTAA".to_owned()),
         ("OtherLabel".to_owned(), "ATCTCTACATGAGGAGGATTACATAGAGGAGATGATGTCCG".to_owned())
-    ]);
+    ]));
 }
 
 #[test]

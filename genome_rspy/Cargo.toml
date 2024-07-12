@@ -4,8 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-packed_genome = { version = "0.1.0", path = "packed_genome" }
+md5 = "0.7.0"
+packed_genome = { version = "0.1.0", path = "packed_genome", features = ["progress"] }
+rayon = "1.10.0"
 serde = { version = "1.0.204", features = ["derive"] }
+tqdm = "0.7.0"
 
 [workspace]
 members = ["packed_genome"]

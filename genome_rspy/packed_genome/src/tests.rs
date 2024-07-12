@@ -180,9 +180,9 @@ fn search_test() {
 
     println!("Sequence: {seq}");
 
-    let haystack = indexed_packed_sequence!(&seq, 3);
+    let haystack = indexed_packed_sequence!(&seq, 5);
 
-    assert_eq!(true, haystack.contains_str("GATC"), "Search at start");
+    assert_eq!(true, haystack.contains_str("GATCG"), "Search at start");
     assert_eq!(true, haystack.contains_str("GA"), "Search shorter than chunk size");
     assert_eq!(true, haystack.contains_str("ATCGGAATGTGAAAT"), "Search (unaligned) beyond start");
     assert_eq!(false, haystack.contains_str("TAAAGTGTAAGGCTA"), "Non existent segment");
@@ -192,4 +192,22 @@ fn search_test() {
     assert_eq!(None, haystack.find_bounded_str(pos_test, Some(33), None), "Start cutoff");
     assert_eq!(None, haystack.find_bounded_str(pos_test, None, Some(95)), "End cutoff");
     assert_eq!(Some(31), haystack.find_bounded_str(pos_test, None, Some(96)), "End cutoff not too harsh");
+}
+
+#[test]
+fn bulk_search_test() {
+    let mut rng = StdRng::seed_from_u64(0);
+    let seq = random_sequence(&mut rng, 100_000);
+
+    println!("Sequence: {seq}");
+
+    let haystack = indexed_packed_sequence!(&seq, 8);
+
+    let needle = &seq[2..2+31];
+    assert_eq!(31, needle.len(), "sanity check");
+    assert_eq!(Some(vec![2]), unsafe {haystack.find_all_31mer(&SimplePackedSequence::new(needle))});
+
+    let needle = "ACTGAGTTAGCTCTAGCATGGTTAGTACTAC";
+    assert_eq!(31, needle.len(), "sanity check");
+    assert_eq!(Some(vec![]), unsafe {haystack.find_all_31mer(&SimplePackedSequence::new(needle))});
 }

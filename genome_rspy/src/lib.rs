@@ -2,7 +2,9 @@ use std::fs;
 use std::{io, path::Path};
 use std::fmt::Display;
 
-use packed_genome::{PackedSequence, SimplePackedSequence, StandardIndexedPackedSequence};
+use packed_genome::{DeSerializable, PackedSequence, SimplePackedSequence, StandardIndexedPackedSequence};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge, ParallelIterator};
+use tqdm::tqdm;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Fasta(Vec<(String, String)>);
@@ -15,6 +17,7 @@ impl Fasta {
             // the first element will be empty (eg ">James\nAAAA>John\nGGGG" splits
             // into ["", "James\nAAAA", "John\nGGGG"])
             .skip(1)
+            .par_bridge()
             .map(|section| {
                 let mut lines = section.lines();
                 let identifier = lines.next();
@@ -24,7 +27,7 @@ impl Fasta {
                     Some(id) => Ok((id.into(), dna)),
                     None => Err(())
                 }
-            });
+            }).collect::<Vec<_>>();
 
         let mut fasta = Vec::new();
 
@@ -56,7 +59,8 @@ impl Fasta {
     /// dropping any sequences that don't fit these requirements
     pub fn clean(&mut self, kmer_length: usize) {
         let took = std::mem::take(&mut self.0);
-        self.0 = took.into_iter()
+        self.0 = tqdm(took.into_iter())
+            .desc(Some("cleaning fasta"))
             .map(|(label, seq)| (label, seq.trim_matches('N').to_owned()))
             .map(|(label, seq)| {
                 let seq = seq.split('N')
@@ -105,7 +109,8 @@ pub struct Chromosome {
 }
 
 impl Chromosome {
-    fn new(name: &str, raw_sequence: &str) -> Chromosome {
+    fn new(name: &str, raw_sequence: &str) -> Result<Chromosome, String> {
+        let raw_sequence = raw_sequence.to_ascii_uppercase();
         let raw_sequence = raw_sequence.trim_end_matches('N');
         let pre_len = raw_sequence.len();
 
@@ -114,12 +119,18 @@ impl Chromosome {
 
         let raw_sequence = raw_sequence.replace('N', "A");
 
-        let seq = StandardIndexedPackedSequence::new(&raw_sequence, 8)
-            .expect("Given chunk length should be valid");
+        if raw_sequence.chars().any(|c| c != 'A' && c != 'C' && c != 'T' && c != 'G') {
+            return Err("Invalid character, must be all A, C, T, G, or N".to_owned());
+        }
+
+        let seq = match StandardIndexedPackedSequence::new(&raw_sequence, 8) {
+            Some(s) => s,
+            None => return Err("Failed to create an IndexedPackedSequence with chunk length 8".to_owned())
+        };
 
         let name = name.to_owned();
 
-        Chromosome { name, raw_sequence, leading_ns, seq }
+        Ok(Chromosome { name, raw_sequence, leading_ns, seq })
     }
 }
 
@@ -143,11 +154,125 @@ macro_rules! iores {
 pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> io::Result<Vec<String>> {
     fs::create_dir_all(storage_dir)?;
 
+    println!("Reading file");
     let fasta_contents = fs::read_to_string(fasta_path)?;
 
+    println!("Parsing fasta");
     let parsed = iores!(Fasta::parse_fasta(&fasta_contents))?;
+    println!("Parsing chromosomes");
 
-    todo!();
+    return Ok(parsed.0.into_par_iter()
+        .filter(|(label, _)| label == "5 dna:chromosome chromosome:GRCh38:5:1:181538259:1 REF")
+        .map(|(label, seq)| {
+            println!("> Parsing chromosome '{}'", &label);
+            let chromosome = Chromosome::new(&label, &seq);
+            drop(seq);
+
+            match chromosome {
+                Ok(c) => {
+                    println!("> Writing chromosome '{}'", &label);
+                    let file_name = format!("{:x}.chr", md5::compute(&label));
+                    let file_path = storage_dir.join(file_name);
+                    println!("> Serializing and compressing '{}'", &label);
+                    let compressed = c.serialize_and_compress();
+
+                    drop(c);
+
+                    let write_result = match compressed {
+                        Ok(comp) => {
+                            println!("> Writing '{}' to disk", &label);
+                            fs::write(file_path, comp)
+                        },
+                        Err(e) => Err(e)
+                    };
+
+                    match write_result {
+                        Ok(()) => println!("> Saved chromosome '{}' successfully", &label),
+                        Err(e) => println!("> Error: Failed to save chromosome '{}': {}", &label, e)
+                    };
+                },
+                Err(e) => {
+                    println!("> Error: Failed to load chromosome '{}': {}", label, e);
+                }
+            }
+
+            return label.to_owned();
+        })
+        .collect()
+    );
+}
+
+pub fn load_mutants(mutants_path: &Path) -> io::Result<PackedFasta> {
+    println!("> Reading mutants");
+    let contents = fs::read_to_string(mutants_path)?;
+
+    println!("> Parsing mutants");
+    let mut mutants = iores!(Fasta::parse_fasta(&contents))?;
+    mutants.clean(31);
+
+    packed_genome::disable_tqdm();
+    let out = mutants.into();
+    packed_genome::enable_tqdm();
+
+    return Ok(out);
+}
+
+pub struct HitRecord {
+    mutant_name: String,
+    chromosome_name: String,
+    // NOTE: the index written here is
+    // (chromosome.raw_sequence.idx(mutant) + chromosome.leading_ns)
+    chromosome_start: usize,
+    chromosome_end: usize
+}
+
+pub fn search_chromosome(chromosome_name: &str, storage_dir: &Path, mutants: PackedFasta) -> io::Result<Vec<HitRecord>> {
+    let file_name = format!("{:x}.chr", md5::compute(&chromosome_name));
+    let file_path = storage_dir.join(file_name);
+
+    println!("> Reading chromosome '{}'", &chromosome_name);
+    let contents = fs::read(file_path)?;
+
+    println!("> Decompressing and deserializing chromosome '{}'", &chromosome_name);
+    let chromosome = iores!(Chromosome::decompress_and_deserialize(&contents))?;
+
+    println!("> Searching chromosome '{}'", &chromosome_name);
+
+    let out = tqdm(mutants.0.iter())
+        .desc(Some("searching"))
+        .map(move |(label, seq)| {
+            seq.subsections(31)
+            .map(move |subs| (label, subs))
+        })
+        .flatten()
+        //.collect::<Vec<_>>()
+        //.into_iter()
+        .par_bridge()
+        .map(|(label, subseq)| {
+            let mut occurrences: Vec<HitRecord> = Vec::new();
+            let mut start = 0;
+
+            while start < chromosome.seq.len() - 31 {
+                start  = match chromosome.seq.find_bounded(&subseq, Some(start), None) {
+                    Some(found) => {
+                        occurrences.push(HitRecord {
+                            mutant_name: label.clone(),
+                            chromosome_name: chromosome_name.to_owned(),
+                            chromosome_start: found + chromosome.leading_ns,
+                            chromosome_end: found + chromosome.leading_ns + subseq.len()
+                        });
+                        found + 1
+                    },
+                    None => break
+                };
+            }
+
+            return occurrences;
+        })
+        .flatten_iter()
+        .collect();
+
+    return Ok(out);
 }
 
 #[cfg(test)]

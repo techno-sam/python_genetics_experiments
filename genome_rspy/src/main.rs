@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use genome_rspy::{load_mutants, parse_chromosomes, search_chromosome};
 use packed_genome::{indexed_packed_sequence, IndexedPackedSequence, PackedSequence, SimplePackedSequence};
 
 fn main() {
@@ -42,5 +45,39 @@ fn main() {
 
     for v in SimplePackedSequence::new("ACT").subsections(7) {
         println!("Subsection: {}", v);
+    }
+
+    let parse: bool = false;
+
+    if parse {
+        let r = parse_chromosomes(
+            Path::new("/home/sam/PycharmProjects/PythonADClassWorkspace/python_genetics_experiments/scratch/Homo_sapiens.GRCh38.dna.primary_assembly.fa"),
+            Path::new("/home/sam/PycharmProjects/PythonADClassWorkspace/python_genetics_experiments/scratch/rust_checkpoints")
+        );
+
+        match r {
+            Ok(v) => {
+                println!("Parsed {} chromosomes:", v.len());
+                for name in v {
+                    println!("\t{}", name);
+                }
+            },
+            Err(e) => println!("Failed to parse chromosomes: {}", e)
+        };
+    } else {
+        let mutants = load_mutants(
+            Path::new("/home/sam/PycharmProjects/PythonADClassWorkspace/python_genetics_experiments/scratch/gget_mutate_out_mutant_reference.fa")
+        ).expect("Failed to load mutants");
+
+        let r = search_chromosome(
+            "5 dna:chromosome chromosome:GRCh38:5:1:181538259:1 REF",
+            Path::new("/home/sam/PycharmProjects/PythonADClassWorkspace/python_genetics_experiments/scratch/rust_checkpoints"),
+            mutants
+        );
+
+        match r {
+            Ok(v) => println!("Searched chromosome, got {} hits", v.len()),
+            Err(e) => println!("Failed to search chromosome: {}", e)
+        };
     }
 }

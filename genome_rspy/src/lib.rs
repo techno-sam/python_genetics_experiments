@@ -1,9 +1,16 @@
+#[cfg(test)]
+mod tests;
+
+mod python_module;
+
 use std::fs;
 use std::{io, path::Path};
 use std::fmt::Display;
 
 use packed_genome::{DeSerializable, PackedSequence, SimplePackedSequence, StandardIndexedPackedSequence};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
+use rayon::ThreadPoolBuildError;
+use thiserror::Error;
 use tqdm::tqdm;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -149,10 +156,9 @@ macro_rules! iores {
     };
 }
 
-// TODO: Python API
 /// Given a path to a fasta file and a directory to store chromosomes in, returns a list of the
 /// names of loaded chromosomes
-pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> io::Result<Vec<String>> {
+pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> Result<Vec<String>, GenomeError> {
     fs::create_dir_all(storage_dir)?;
 
     println!("Reading file");
@@ -203,6 +209,38 @@ pub fn parse_chromosomes(fasta_path: &Path, storage_dir: &Path) -> io::Result<Ve
     );
 }
 
+#[derive(Error, Debug)]
+pub enum GenomeError {
+    #[error("Cannot use index length {0} for {1}-mers, that will take until the heat death of the universe")]
+    /// (index length, kmer length)
+    HeatDeath(usize, usize),
+
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+
+    #[error(transparent)]
+    ThreadPoolError(#[from] ThreadPoolBuildError)
+}
+
+pub fn create_pool(num_threads: usize) -> Result<rayon::ThreadPool, GenomeError> {
+    return Ok(rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()?)
+}
+
+pub fn load_mutants_and_search_chromosome(
+    mutants_path: &Path,
+    chromosome_name: &str,
+    storage_dir: &Path,
+    kmer_length: usize
+) -> Result<Vec<OwnedHitRecord>, GenomeError> {
+    let mutants = load_mutants(mutants_path)?;
+
+    let found = search_chromosome_general(chromosome_name, storage_dir, &mutants, kmer_length)?;
+
+    Ok(found.into_iter().map(|v| v.into()).collect())
+}
+
 pub fn load_mutants(mutants_path: &Path) -> io::Result<PackedFasta> {
     println!("> Reading mutants");
     let contents = fs::read_to_string(mutants_path)?;
@@ -226,7 +264,27 @@ pub struct HitRecord<'a> {
     chromosome_start: usize
 }
 
-pub fn search_chromosome_general<'a>(chromosome_name: &str, storage_dir: &Path, mutants: &'a PackedFasta, kmer_length: usize) -> io::Result<Vec<HitRecord<'a>>> {
+#[derive(Debug)]
+pub struct OwnedHitRecord {
+    read_name: String,
+    chromosome_start: usize
+}
+
+impl<'a> From<HitRecord<'a>> for OwnedHitRecord {
+    fn from(value: HitRecord<'a>) -> Self {
+        OwnedHitRecord {
+            read_name: value.read_name.to_owned(),
+            chromosome_start: value.chromosome_start
+        }
+    }
+}
+
+pub fn search_chromosome_general<'a>(
+    chromosome_name: &str,
+    storage_dir: &Path,
+    mutants: &'a PackedFasta,
+    kmer_length: usize
+) -> Result<Vec<HitRecord<'a>>, GenomeError> {
     if kmer_length == 31 {
         return search_chromosome(chromosome_name, storage_dir, mutants);
     }
@@ -241,15 +299,13 @@ pub fn search_chromosome_general<'a>(chromosome_name: &str, storage_dir: &Path, 
     let contents = fs::read(file_path)?;
 
     println!("> Deserializing chromosome '{}'", &chromosome_name);
-    let chromosome = iores!(Chromosome::decompress_and_deserialize(&contents))?;
+    let chromosome = Chromosome::decompress_and_deserialize(&contents)?;
 
     println!("> Searching chromosome '{}'", &chromosome_name);
 
     let chunk_length = chromosome.seq.chunk_length();
     if chunk_length > kmer_length {
-        return iores!(Err::<Vec<HitRecord<'a>>, String>(
-                format!("Cannot use index length {} for {}-mers, that will take until the heat death of the universe", chunk_length, kmer_length)
-        ));
+        return Err(GenomeError::HeatDeath(chunk_length, kmer_length));
     }
 
     let out = tqdm(mutants.0.iter())
@@ -277,14 +333,18 @@ pub fn search_chromosome_general<'a>(chromosome_name: &str, storage_dir: &Path, 
             return occurrences;
         })
         .flatten_iter()
-        .take_any(5)
+        .take_any(5) // FIXME: remove this after done testing
         .collect();
 
     return Ok(out);
 }
 
 // TODO: Python API combined with `load_mutants` above
-pub fn search_chromosome<'a>(chromosome_name: &str, storage_dir: &Path, mutants: &'a PackedFasta) -> io::Result<Vec<HitRecord<'a>>> {
+pub fn search_chromosome<'a>(
+    chromosome_name: &str,
+    storage_dir: &Path,
+    mutants: &'a PackedFasta
+) -> Result<Vec<HitRecord<'a>>, GenomeError> {
     let file_name = format!("{:x}.chr", md5::compute(&chromosome_name));
     let file_path = storage_dir.join(file_name);
 
@@ -292,15 +352,13 @@ pub fn search_chromosome<'a>(chromosome_name: &str, storage_dir: &Path, mutants:
     let contents = fs::read(file_path)?;
 
     println!("> Deserializing chromosome '{}'", &chromosome_name);
-    let chromosome = iores!(Chromosome::decompress_and_deserialize(&contents))?;
+    let chromosome = Chromosome::decompress_and_deserialize(&contents)?;
 
     println!("> Searching chromosome '{}'", &chromosome_name);
 
     let chunk_length = chromosome.seq.chunk_length();
     if chunk_length > 31 {
-        return iores!(Err::<Vec<HitRecord<'a>>, String>(
-                format!("Cannot use index length {} for 31-mers, that will take until the heat death of the universe", chunk_length)
-        ));
+        return Err(GenomeError::HeatDeath(chunk_length, 31));
     }
 
     let out = tqdm(mutants.0.iter())
@@ -334,11 +392,8 @@ pub fn search_chromosome<'a>(chromosome_name: &str, storage_dir: &Path, mutants:
             return occurrences;
         })
         .flatten_iter()
-        .take_any(5)
+        .take_any(5) // FIXME: remove this after done testing
         .collect();
 
     return Ok(out);
 }
-
-#[cfg(test)]
-mod tests;
